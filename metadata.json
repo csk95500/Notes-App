@@ -1,0 +1,7 @@
+{
+  "name": "MindNote AI",
+  "description": "A smart, organized note-taking application with folder structures, recurring reminders, and Gemini-powered AI writing assistance.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
