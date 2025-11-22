@@ -10,21 +10,22 @@ const DEFAULT_FOLDERS: Folder[] = [
   { id: 'ideas', name: 'Ideas', icon: '💡' },
 ];
 
+const safeParse = <T>(key: string, fallback: T): T => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (e) {
+    console.error(`Error parsing ${key} from localStorage:`, e);
+    return fallback;
+  }
+};
+
 export const useNotesStore = () => {
-  const [notes, setNotes] = useState<Note[]>(() => {
-    const saved = localStorage.getItem('mindnote_notes');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [notes, setNotes] = useState<Note[]>(() => safeParse('mindnote_notes', []));
 
-  const [folders, setFolders] = useState<Folder[]>(() => {
-    const saved = localStorage.getItem('mindnote_folders');
-    return saved ? JSON.parse(saved) : DEFAULT_FOLDERS;
-  });
+  const [folders, setFolders] = useState<Folder[]>(() => safeParse('mindnote_folders', DEFAULT_FOLDERS));
 
-  const [reminders, setReminders] = useState<Reminder[]>(() => {
-    const saved = localStorage.getItem('mindnote_reminders');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [reminders, setReminders] = useState<Reminder[]>(() => safeParse('mindnote_reminders', []));
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
