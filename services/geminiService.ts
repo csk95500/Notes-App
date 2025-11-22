@@ -50,3 +50,33 @@ export const generateAIContent = async (
     return "Error generating AI response. Please check your API key or try again.";
   }
 };
+
+export const getAutoCompletion = async (text: string): Promise<string | null> => {
+  try {
+    // Only send the last ~500 characters for context to keep it fast and relevant
+    const context = text.slice(-1000); 
+    if (!context.trim()) return null;
+
+    const prompt = `You are an autocomplete engine. The user is typing a note in Markdown. 
+    Provide a subtle, natural completion for the very last sentence or phrase. 
+    If the sentence is incomplete, complete it. 
+    If the sentence is complete, suggest a short, logical follow-up sentence.
+    Keep it short (max 1-2 sentences).
+    Do not repeat the input text.
+    Return ONLY the suggested text.
+    If unsure or no good suggestion exists, return an empty string.
+    
+    Current text context:
+    "${context}"`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    });
+
+    return response.text ? response.text.trim() : null;
+  } catch (error) {
+    console.error("Gemini Autocomplete Error:", error);
+    return null;
+  }
+};

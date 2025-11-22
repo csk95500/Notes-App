@@ -5,8 +5,9 @@ import {
   Bold, Italic, List, ListOrdered, Code, Quote, 
   Eye, EyeOff, Heading1, Heading2, Type, Link as LinkIcon,
   Mic, MicOff, Terminal, CheckSquare, Search, X, ArrowRight, RefreshCw,
-  Undo, Redo
+  Undo, Redo, Sparkles, Copy, Check
 } from 'lucide-react';
+import { getAutoCompletion } from '../services/geminiService';
 
 interface MarkdownEditorProps {
   value: string;
@@ -58,6 +59,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
   // This state is purely to force re-renders when history changes so buttons update
   const [, setHistoryTick] = useState(0);
 
+  // AI Suggestion State
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [isFetchingSuggestion, setIsFetchingSuggestion] = useState(false);
+  const suggestionTimeoutRef = useRef<any>(null);
+
+  // Copy State
+  const [isCopied, setIsCopied] = useState(false);
+
   const recognitionRef = useRef<any>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
@@ -91,14 +100,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
          handleRedo();
       }
       // Escape
-      if (e.key === 'Escape' && showFindReplace) {
-          setShowFindReplace(false);
-          textareaRef.current?.focus();
+      if (e.key === 'Escape') {
+          if (suggestion) {
+              setSuggestion(null);
+          } else if (showFindReplace) {
+              setShowFindReplace(false);
+              textareaRef.current?.focus();
+          }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPreview, showFindReplace]); // Dependencies required for closure access
+  }, [isPreview, showFindReplace, suggestion]); 
 
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -152,9 +165,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
 
   const handleValueChange = (newValue: string, immediate = false) => {
     onChange(newValue); // Always update parent immediately
+    setSuggestion(null); // Clear suggestion on type
 
     if (historyTimeoutRef.current) {
         clearTimeout(historyTimeoutRef.current);
+    }
+    if (suggestionTimeoutRef.current) {
+        clearTimeout(suggestionTimeoutRef.current);
     }
 
     if (immediate) {
@@ -164,6 +181,19 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
         historyTimeoutRef.current = setTimeout(() => {
             addToHistory(newValue);
         }, 1000);
+        
+        // Debounce AI Suggestion (1.5s pause)
+        // Only trigger if text is long enough to have context
+        if (newValue.length > 20) {
+            suggestionTimeoutRef.current = setTimeout(async () => {
+                setIsFetchingSuggestion(true);
+                const result = await getAutoCompletion(newValue);
+                if (result) {
+                    setSuggestion(result);
+                }
+                setIsFetchingSuggestion(false);
+            }, 1500);
+        }
     }
   };
 
@@ -219,6 +249,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
     }, 0);
   };
 
+  const handleTextAreaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Accept suggestion with Tab
+      if (e.key === 'Tab' && suggestion) {
+          e.preventDefault();
+          insertTextAtCursor(suggestion);
+          setSuggestion(null);
+      }
+  };
+
   const toggleRecording = () => {
     if (!recognitionRef.current) {
       alert("Speech recognition is not supported in this browser.");
@@ -231,6 +270,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
     } else {
       recognitionRef.current.start();
       setIsRecording(true);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (value) {
+      try {
+        await navigator.clipboard.writeText(value);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+      } catch (err) {
+        console.error('Failed to copy!', err);
+      }
     }
   };
 
@@ -340,7 +391,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-white dark:bg-slate-900 transition-colors duration-200">
+    <div className="flex flex-col h-full w-full bg-white dark:bg-slate-900 transition-colors duration-200 relative">
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-0 px-6 pt-2">
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
@@ -398,6 +449,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
             title={isRecording ? "Stop Recording" : "Start Dictation"}
             className={isRecording ? 'bg-red-50 text-red-600 animate-pulse ring-1 ring-red-200 hover:bg-red-100 hover:text-red-700 dark:bg-red-900/20 dark:ring-red-900 dark:text-red-400' : ''}
             active={isRecording}
+          />
+
+          <ToolbarBtn 
+            onClick={handleCopy}
+            icon={isCopied ? Check : Copy}
+            title={isCopied ? "Copied!" : "Copy to Clipboard"}
+            className={isCopied ? 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20' : ''}
           />
         </div>
 
@@ -469,7 +527,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
        )}
 
       {/* Editor / Preview Area */}
-      <div className="flex-1 relative overflow-hidden px-6">
+      <div className="flex-1 relative overflow-hidden px-6 group">
         {isPreview ? (
           <div className="h-full w-full overflow-y-auto prose prose-slate dark:prose-invert prose-indigo max-w-none py-4 pr-2">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -482,19 +540,54 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange 
             id="markdown-textarea"
             value={value}
             onChange={(e) => handleValueChange(e.target.value, false)}
+            onKeyDown={handleTextAreaKeyDown}
             placeholder="Start typing your note or use the microphone to dictate..."
-            className="w-full h-full resize-none text-lg text-slate-700 dark:text-slate-300 placeholder-slate-300 dark:placeholder-slate-600 border-none outline-none bg-transparent leading-relaxed font-mono pt-4"
+            className="w-full h-full resize-none text-lg text-slate-700 dark:text-slate-300 placeholder-slate-300 dark:placeholder-slate-600 border-none outline-none bg-transparent leading-relaxed font-mono pt-4 pb-24"
           />
+        )}
+
+        {/* AI Suggestion Pill */}
+        {suggestion && !isPreview && (
+            <div className="absolute bottom-4 left-6 right-6 animate-in slide-in-from-bottom-2 fade-in duration-300 z-20">
+                <div className="bg-indigo-50 dark:bg-slate-800 border border-indigo-100 dark:border-slate-600 rounded-xl shadow-lg p-3 flex items-start gap-3 max-w-2xl mx-auto">
+                    <div className="p-2 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg text-indigo-600 dark:text-indigo-400 flex-shrink-0">
+                        <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-0.5 uppercase tracking-wide">
+                            AI Suggestion
+                        </p>
+                        <p className="text-sm text-slate-700 dark:text-slate-300 font-medium line-clamp-2 font-mono">
+                            {suggestion}
+                        </p>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">
+                            Press <kbd className="font-bold font-sans bg-white dark:bg-slate-700 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-600 mx-0.5 text-slate-600 dark:text-slate-300">Tab</kbd> to accept • <kbd className="font-bold font-sans bg-white dark:bg-slate-700 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-600 mx-0.5 text-slate-600 dark:text-slate-300">Esc</kbd> to dismiss
+                        </p>
+                    </div>
+                    <button 
+                        onClick={() => setSuggestion(null)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
         )}
       </div>
 
       {/* Status Bar */}
-      <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 flex items-center justify-between text-sm text-slate-600 dark:text-slate-400 font-medium transition-colors">
+      <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 flex items-center justify-between text-sm text-slate-600 dark:text-slate-400 font-medium transition-colors z-30">
         <div className="flex items-center gap-4">
             {isRecording && (
                 <span className="flex items-center gap-2 text-red-600 dark:text-red-400 animate-pulse font-semibold">
                     <div className="w-2.5 h-2.5 bg-red-600 rounded-full"></div>
                     Recording...
+                </span>
+            )}
+            {isFetchingSuggestion && (
+                <span className="flex items-center gap-2 text-indigo-500 dark:text-indigo-400 text-xs animate-pulse">
+                    <Sparkles className="w-3 h-3" />
+                    AI thinking...
                 </span>
             )}
         </div>
